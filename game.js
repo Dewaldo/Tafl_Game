@@ -2,7 +2,6 @@
 /* Code from http://diveintohtml5.info/canvas.html       */
 /*                                                       */
 /* To Do:                                                */
-/* + Implement valid moves function                      */
 /* + Highlight valid move squares                        */
 /* + Implement move function                             */
 /*-------------------------------------------------------*/
@@ -19,13 +18,24 @@ var kPixelHeight= 1 + (kBoardHeight * kPieceHeight);
 var gCanvasElement;
 var gDrawingContext;
 
+var gIsOccupied = [];
 var gWhitePieces = [];
 var gBlackPieces = [];
-var gSelectedPiece = new Cell();
+var gSelectedPiece; //= new Cell();
 var gSelectedPieceHasMoved;
 var gValidMoves = [];
 var gGameInProgress;
 //}
+
+/*OBJECTS*/
+/*Perhaps integrate some of the functions as methods down the line?*/
+//{
+/*Represents position on the game board*/
+/*Eventually replace all "column"s and "row"s with this when I'm not lazy*/
+function Coordinate (y,x) {
+	this.y = y;
+	this.x = x;
+}
 
 /*An object placed on the gameBoard canvas*/
 function Cell(row, column, isBlack, isKing, isSelected){
@@ -35,6 +45,7 @@ function Cell(row, column, isBlack, isKing, isSelected){
 	this.isKing = isKing;
 	this.isSelected = false;
 }
+//}
 
 /*GAMEFLOW FUNCTIONS*/
 //{
@@ -52,7 +63,17 @@ function initGame(canvasElement) {
 	gDrawingContext = gCanvasElement.getContext("2d");
 	
 	if(!resumeGame()) {
+		createBoardArray();
 		newGame();
+	}
+}
+
+function createBoardArray() {
+	for(var y=0; y<kBoardHeight; y++) {
+		gIsOccupied[y] = [];
+		for(var x=0; x<kBoardWidth; x++) {
+			gIsOccupied[y][x] = false;
+		}
 	}
 }
 
@@ -66,20 +87,29 @@ function newGame() {
 			} else {
 				gWhitePieces.push(new Cell(y,x,false,false));
 			}
+			gIsOccupied[y][x] = true;
 		}
 	}
 	
 	/*Place the attackers*/
+	/*May need a function to consolidate new piece and occupied square creation*/
 	for (var i=3; i<8; i+=1) {
 		gBlackPieces.push(new Cell(0,i,true,false));
+		gIsOccupied[0][i] = true;
 		gBlackPieces.push(new Cell(10,i,true,false));
+		gIsOccupied[10][i] = true;
 		gBlackPieces.push(new Cell(i,0,true,false));
+		gIsOccupied[i][0] = true;
 		gBlackPieces.push(new Cell(i,10,true,false));
+		gIsOccupied[i][10] = true;
 		
 		if (i==5){
 			gBlackPieces.push(new Cell(1,i,true,false));
+			gIsOccupied[1][i] = true;
 			gBlackPieces.push(new Cell(9,i,true,false));
+			gIsOccupied[9][i] = true;
 			gBlackPieces.push(new Cell(i,1,true,false));
+			gIsOccupied[i][1] = true;
 			gBlackPieces.push(new Cell(i,9,true,false));
 		}
 		
@@ -210,18 +240,9 @@ function drawHighlight(x,y,radius) {
 	gDrawingContext.stroke();
 	
 	/*Draw a highlight around valid moves*/
-}
-
-function validMoves(p) {
-
-    var column = p.column;
-    var row = p.row;
 	
-	/*Scan for empty squares*/
-	for(var i=0; i<11; i++) {
-		
-	}
 }
+
 //}
 
 /*CLICK FUNCTIONS*/
@@ -243,6 +264,8 @@ function getCursorPosition(e) {
 	y-= gCanvasElement.offsetTop;
 	x = Math.min(x, kBoardWidth * kPieceWidth);
 	y = Math.min(y, kBoardHeight * kPieceHeight);
+	
+	/*Not altogether sure if this creates a new cell or references an existing one*/
 	var cell = new Cell(Math.floor(y/kPieceHeight), Math.floor(x/kPieceWidth));
 	return cell;
 }
@@ -266,21 +289,80 @@ function gameBoardOnClick(e) {
     clickOnEmptyCell(cell);
 }
 
-function clickOnEmptyCell(cell) {
-
-	/*If no piece is selected, exit function*/
-}
-
 function clickOnPiece(cell) {
 	if (cell.isSelected) { return; }
 	/*Unselect the previous piece before selecting a new one*/
-	if (gSelectedPiece !== null) {
+	if (gSelectedPiece !== undefined) {
 		gSelectedPiece.isSelected = false;
 	}
     gSelectedPiece = cell;
 	gSelectedPiece.isSelected = true;
     gSelectedPieceHasMoved = false;
+	validMoves(cell);
+	console.log(gValidMoves);
     drawBoard();
 }
 
+function validMoves(p) {
+
+	gValidMoves = [];
+    var column = p.column;
+    var row = p.row;
+	
+	/*These series of for loops are a bit hacky*/
+	
+	/*Scan for empty squares above*/
+	for(var i=row-1; i>=0; i--) {
+		if(!gIsOccupied[i][column]) {
+			gValidMoves.push(new Coordinate(i,column));
+		} else {break;}
+	}
+	
+	/*Scan empty rows below*/
+	for(var i=row+1; i<kBoardHeight; i++) {
+		if(!gIsOccupied[i][column]) {
+			gValidMoves.push(new Coordinate(i,column));
+		} else {break;}
+	}
+	
+	/*Scan empty rows to the left*/
+	for(var i=column-1; i>=0; i--) {
+		if(!gIsOccupied[row][i]) {
+			gValidMoves.push(new Coordinate(row,i));
+		} else {break;}
+	}
+	
+	/*Scan empty rows to the right*/
+	for(var i=column+1; i<kBoardWidth; i++) {
+		if(!gIsOccupied[row][i]) {
+			gValidMoves.push(new Coordinate(row,i));
+		} else {break;}
+	}
+}
+
+function clickOnEmptyCell(cell) {
+
+	/*If no piece or an invalid piece is selected, exit function*/
+	if (gSelectedPiece == undefined || gSelectedPiece == null) {return;}
+	
+	/*Compare the clicked space to the list of valid moves*/
+	var moveIsValid = false;
+	for (var i=0; i<gValidMoves.length; i++) {
+		if(gValidMoves[i].x == cell.column && gValidMoves[i].y == cell.row) {
+			moveIsValid = true;
+			break;
+		}
+	}
+	
+	/*If the move is a valid one, move the piece there and re-draw the board*/
+	/*Later, implement the player switching here*/
+	if (moveIsValid) {
+		gSelectedPiece.column = cell.column;
+		gSelectedPiece.row = cell.row;
+		gSelectedPiece.isSelected = false;
+		gSelectedPiece = undefined;
+		drawBoard();
+	}
+	
+}
 //}
