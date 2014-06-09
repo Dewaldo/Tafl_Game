@@ -1,10 +1,13 @@
-/*-------------------------------------------------------*/
-/* Code from http://diveintohtml5.info/canvas.html       */
-/*                                                       */
-/* To Do:                                                */
-/* + Highlight valid move squares                        */
-/* + Implement move function                             */
-/*-------------------------------------------------------*/
+/*----------------------------------------------------------*/
+/* Code template from http://diveintohtml5.info/canvas.html */
+/*                                                          */
+/* To Do:                                                   */
+/* + Fix "out of bounds" issue with piece removal           */
+/* + Fix piece removal to work for double captures          */
+/* + Restrict castle movement to king piece                 */
+/* + Implement a player turn order system                   */
+/* + Implement victory conditions and game end              */
+/*----------------------------------------------------------*/
 
 /*CONSTANTS AND GLOBAL VARIABLES*/
 //{
@@ -21,7 +24,7 @@ var gDrawingContext;
 var gIsOccupied = [];
 var gWhitePieces = [];
 var gBlackPieces = [];
-var gSelectedPiece; //= new Cell();
+var gSelectedPiece;
 var gSelectedPieceHasMoved;
 var gValidMoves = [];
 var gGameInProgress;
@@ -29,6 +32,7 @@ var gGameInProgress;
 
 /*OBJECTS*/
 /*Perhaps integrate some of the functions as methods down the line?*/
+/*A "game board" object would also be handy*/
 //{
 /*Represents position on the game board*/
 /*Eventually replace all "column"s and "row"s with this when I'm not lazy*/
@@ -270,6 +274,7 @@ function getCursorPosition(e) {
 	return cell;
 }
 
+/*Checks whether a game piece or empty cell is clicked*/
 function gameBoardOnClick(e) {
     var cell = getCursorPosition(e);
     for (var i = 0; i < gWhitePieces.length; i++) {
@@ -289,6 +294,7 @@ function gameBoardOnClick(e) {
     clickOnEmptyCell(cell);
 }
 
+/*Will highlight a clicked piece and populate valid moves array*/
 function clickOnPiece(cell) {
 	if (cell.isSelected) { return; }
 	/*Unselect the previous piece before selecting a new one*/
@@ -299,10 +305,10 @@ function clickOnPiece(cell) {
 	gSelectedPiece.isSelected = true;
     gSelectedPieceHasMoved = false;
 	validMoves(cell);
-	console.log(gValidMoves);
     drawBoard();
 }
 
+/*Re-populates the gValidMoves array*/
 function validMoves(p) {
 
 	gValidMoves = [];
@@ -340,12 +346,14 @@ function validMoves(p) {
 	}
 }
 
+/*Moves a piece if one is selected*/
 function clickOnEmptyCell(cell) {
 
 	/*If no piece or an invalid piece is selected, exit function*/
-	if (gSelectedPiece == undefined || gSelectedPiece == null) {return;}
+	if (gSelectedPiece == undefined) {return;}
 	
 	/*Compare the clicked space to the list of valid moves*/
+	/*Implement king-checking for castle spaces*/
 	var moveIsValid = false;
 	for (var i=0; i<gValidMoves.length; i++) {
 		if(gValidMoves[i].x == cell.column && gValidMoves[i].y == cell.row) {
@@ -357,12 +365,94 @@ function clickOnEmptyCell(cell) {
 	/*If the move is a valid one, move the piece there and re-draw the board*/
 	/*Later, implement the player switching here*/
 	if (moveIsValid) {
+		gIsOccupied[gSelectedPiece.row][gSelectedPiece.column] = false;
 		gSelectedPiece.column = cell.column;
 		gSelectedPiece.row = cell.row;
 		gSelectedPiece.isSelected = false;
+		gIsOccupied[gSelectedPiece.row][gSelectedPiece.column] = true;
+		checkAdjacentPieces(gSelectedPiece);
 		gSelectedPiece = undefined;
 		drawBoard();
 	}
 	
+}
+
+/*THESE LAST TWO FUNCTIONS ARE A GODDAMN MESS. I MAY NEED TO IMPLEMENT A "GAMEBOARD" OBJECT TO CLEAN IT UP*/
+
+/*Checks for adjacent pieces after a piece has moved*/
+function checkAdjacentPieces(p) {
+	
+	for(var y=-1; y<=1; y++) {
+		if (y==-1 || y==1) {
+			if (gIsOccupied[p.row+y][p.column]) {
+				isSurrounded(p, new Coordinate(p.row+y, p.column));
+			}
+		} else {
+			if (gIsOccupied[p.row+y][p.column-1]) {
+				isSurrounded(p, new Coordinate(p.row+y, p.column-1));
+			} else if (gIsOccupied[p.row+y][p.column+1]) {
+				isSurrounded(p, new Coordinate(p.row+y, p.column+1));
+			}
+		}
+	}
+}
+
+/*Determines whether a piece is surrounded*/
+function isSurrounded(originalPiece, targetCoordinate) {
+
+	if(originalPiece.isBlack){
+		/*Search through all the white pieces for a match. INEFFICIENT!*/
+		for(var i=0; i<gWhitePieces.length; i++){
+			
+			/*If there is a white piece, check the opposite side for a piece*/
+			if(gWhitePieces[i].row == targetCoordinate.y && gWhitePieces[i].column == targetCoordinate.x) {
+
+				var pieceOffsetY = gWhitePieces[i].row - originalPiece.row;
+				var pieceOffsetX = gWhitePieces[i].column - originalPiece.column;
+				
+				/*Look at the other side for a black piece. INEFFICIENT!*/
+				if(gIsOccupied[targetCoordinate.y+pieceOffsetY][targetCoordinate.x+pieceOffsetX]){
+					for(var j=0; j<gBlackPieces.length; j++) {
+						if(gBlackPieces[j].row == targetCoordinate.y + pieceOffsetY && gBlackPieces[j].column == targetCoordinate.x + pieceOffsetX) {
+							removePiece(gWhitePieces[i], i);
+						}
+					}
+				}
+			}
+		}
+	} else {
+		/*Search through all the black pieces for a match. INEFFICIENT*/
+		for(var i=0; i<gBlackPieces.length; i++){
+			
+			/*If there is a black piece, check the opposite side for a piece*/
+			if(gBlackPieces[i].row == targetCoordinate.y && gBlackPieces[i].column == targetCoordinate.x) {
+
+				var pieceOffsetY = gBlackPieces[i].row - originalPiece.row;
+				var pieceOffsetX = gBlackPieces[i].column - originalPiece.column;
+				
+				/*Look at the other side for a white piece. INEFFICIENT!*/
+				if(gIsOccupied[targetCoordinate.y+pieceOffsetY][targetCoordinate.x+pieceOffsetX]){
+					for(var j=0; j<gWhitePieces.length; j++) {
+						if(gWhitePieces[j].row == targetCoordinate.y + pieceOffsetY && gWhitePieces[j].column == targetCoordinate.x + pieceOffsetX) {
+							removePiece(gBlackPieces[i], i);
+						}
+					}
+				}
+			}
+		}
+	}
+	
+}
+
+/*Removes a piece from the game board then re-draws the board*/
+function removePiece(p, pieceArrayIndex) {
+	gIsOccupied[p.row][p.column] = false;
+	
+	if(p.isBlack) {
+		gBlackPieces.splice(pieceArrayIndex, 1);
+	} else {
+		gWhitePieces.splice(pieceArrayIndex, 1);
+	}
+	drawBoard();
 }
 //}
