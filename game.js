@@ -2,9 +2,7 @@
 /* Code template from http://diveintohtml5.info/canvas.html */
 /*                                                          */
 /* To Do:                                                   */
-/* + Fix "out of bounds" issue with piece removal           */
-/* + Fix piece removal to work for double captures          */
-/* + Restrict castle movement to king piece                 */
+/* + Fix hostile castles for the king                       */
 /* + Implement a player turn order system                   */
 /* + Implement victory conditions and game end              */
 /*----------------------------------------------------------*/
@@ -24,8 +22,8 @@ var gDrawingContext;
 var gIsOccupied = [];
 var gWhitePieces = [];
 var gBlackPieces = [];
+var gKingPiece;
 var gSelectedPiece;
-var gSelectedPieceHasMoved;
 var gValidMoves = [];
 var gGameInProgress;
 //}
@@ -87,9 +85,11 @@ function newGame() {
 	for (var y=3; y<8; y+= 1){
 		for (var x=4-Math.sin(y*(Math.PI/2)); x<7+Math.sin(y*(Math.PI/2)); x+=1){
 			if (y==5 && x==5){
-				gWhitePieces.push(new Cell(y,x,false,true));
+				gKingPiece = new Cell(y,x,false,true)
+				gWhitePieces.push(gKingPiece);
+				
 			} else {
-				gWhitePieces.push(new Cell(y,x,false,false));
+				gWhitePieces.push(new Cell(y,Math.round(x),false,false));
 			}
 			gIsOccupied[y][x] = true;
 		}
@@ -119,7 +119,6 @@ function newGame() {
 		
 	}
 	
-    gSelectedPieceHasMoved = false;
     gGameInProgress = true;
     drawBoard();
 }
@@ -249,7 +248,7 @@ function drawHighlight(x,y,radius) {
 
 //}
 
-/*CLICK FUNCTIONS*/
+/*PIECE MOVEMENT FUNCTIONS*/
 //{
 /*Returns Cell with .row and .column properties*/
 function getCursorPosition(e) {
@@ -303,7 +302,6 @@ function clickOnPiece(cell) {
 	}
     gSelectedPiece = cell;
 	gSelectedPiece.isSelected = true;
-    gSelectedPieceHasMoved = false;
 	validMoves(cell);
     drawBoard();
 }
@@ -353,9 +351,16 @@ function clickOnEmptyCell(cell) {
 	if (gSelectedPiece == undefined) {return;}
 	
 	/*Compare the clicked space to the list of valid moves*/
-	/*Implement king-checking for castle spaces*/
 	var moveIsValid = false;
 	for (var i=0; i<gValidMoves.length; i++) {
+		
+		/*Check for movement on the castle squares*/
+		if((cell.row == 0 || cell.row == 10) && (cell.column==0 || cell.column == 10)){
+			if(!gSelectedPiece.isKing) {
+				break;
+			}
+		}
+		
 		if(gValidMoves[i].x == cell.column && gValidMoves[i].y == cell.row) {
 			moveIsValid = true;
 			break;
@@ -377,29 +382,38 @@ function clickOnEmptyCell(cell) {
 	
 }
 
-/*THESE LAST TWO FUNCTIONS ARE A GODDAMN MESS. I MAY NEED TO IMPLEMENT A "GAMEBOARD" OBJECT TO CLEAN IT UP*/
+//}
+
+/*PIECE CAPTURE FUNCTIONS*/
+//{
+/*THESE NEXT TWO FUNCTIONS ARE A GODDAMN MESS. I MAY NEED TO IMPLEMENT A "GAMEBOARD" OBJECT TO CLEAN IT UP*/
 
 /*Checks for adjacent pieces after a piece has moved*/
+/*Calls isSurrounded if a piece is detected*/
 function checkAdjacentPieces(p) {
 	
 	for(var y=-1; y<=1; y++) {
-		if (y==-1 || y==1) {
-			if (gIsOccupied[p.row+y][p.column]) {
-				isSurrounded(p, new Coordinate(p.row+y, p.column));
+		try {
+			if (y==-1 || y==1) {
+				if (gIsOccupied[p.row+y][p.column]) {
+					isSurrounded(p, new Coordinate(p.row+y, p.column));
+				}
+			} else {
+				if (gIsOccupied[p.row+y][p.column-1]) {
+					isSurrounded(p, new Coordinate(p.row+y, p.column-1));
+				} 
+				
+				if (gIsOccupied[p.row+y][p.column+1]) {
+					isSurrounded(p, new Coordinate(p.row+y, p.column+1));
+				}
 			}
-		} else {
-			if (gIsOccupied[p.row+y][p.column-1]) {
-				isSurrounded(p, new Coordinate(p.row+y, p.column-1));
-			} else if (gIsOccupied[p.row+y][p.column+1]) {
-				isSurrounded(p, new Coordinate(p.row+y, p.column+1));
-			}
-		}
+		} catch (err) {}
 	}
 }
 
-/*Determines whether a piece is surrounded*/
+/*Determines whether a piece is surrounded, if so removePiece function is called*/
 function isSurrounded(originalPiece, targetCoordinate) {
-
+	
 	if(originalPiece.isBlack){
 		/*Search through all the white pieces for a match. INEFFICIENT!*/
 		for(var i=0; i<gWhitePieces.length; i++){
@@ -410,14 +424,43 @@ function isSurrounded(originalPiece, targetCoordinate) {
 				var pieceOffsetY = gWhitePieces[i].row - originalPiece.row;
 				var pieceOffsetX = gWhitePieces[i].column - originalPiece.column;
 				
+				/*Make the castle squares hostile*/
+				if ((targetCoordinate.y+pieceOffsetY == 0 || targetCoordinate.y+pieceOffsetY == 10)&&(targetCoordinate.x+pieceOffsetX == 0 || targetCoordinate.x+pieceOffsetX == 10)) {
+					removePiece(gWhitePieces[i], i);
+				}
+				
 				/*Look at the other side for a black piece. INEFFICIENT!*/
-				if(gIsOccupied[targetCoordinate.y+pieceOffsetY][targetCoordinate.x+pieceOffsetX]){
-					for(var j=0; j<gBlackPieces.length; j++) {
-						if(gBlackPieces[j].row == targetCoordinate.y + pieceOffsetY && gBlackPieces[j].column == targetCoordinate.x + pieceOffsetX) {
-							removePiece(gWhitePieces[i], i);
+				/*I hate looking at this fucking garbage*/
+				try {
+					if(gWhitePieces[i].isKing){
+						var sideA = false;
+						var sideB = false;
+						var sideC = false;
+						if(gIsOccupied[targetCoordinate.y+pieceOffsetY][targetCoordinate.x+pieceOffsetX]){
+							for(var j=0; j<gBlackPieces.length; j++) {
+								if(gBlackPieces[j].row == targetCoordinate.y + pieceOffsetY && gBlackPieces[j].column == targetCoordinate.x + pieceOffsetX) {
+									sideA = true;
+								} else if (gBlackPieces[j].row == targetCoordinate.y + pieceOffsetX && gBlackPieces[j].column == targetCoordinate.x + pieceOffsetY) {
+									sideB = true;
+								} else if (gBlackPieces[j].row == targetCoordinate.y - pieceOffsetX && gBlackPieces[j].column == targetCoordinate.x - pieceOffsetY) {
+									sideC = true;
+								}
+							}
+							
+							if (sideA && sideB && sideC) {
+								removePiece(gWhitePieces[i], i);
+							}
+						}
+					} else {
+						if(gIsOccupied[targetCoordinate.y+pieceOffsetY][targetCoordinate.x+pieceOffsetX]){
+							for(var j=0; j<gBlackPieces.length; j++) {
+								if(gBlackPieces[j].row == targetCoordinate.y + pieceOffsetY && gBlackPieces[j].column == targetCoordinate.x + pieceOffsetX) {
+									removePiece(gWhitePieces[i], i);
+								}
+							}
 						}
 					}
-				}
+				} catch(err) {}
 			}
 		}
 	} else {
@@ -430,22 +473,29 @@ function isSurrounded(originalPiece, targetCoordinate) {
 				var pieceOffsetY = gBlackPieces[i].row - originalPiece.row;
 				var pieceOffsetX = gBlackPieces[i].column - originalPiece.column;
 				
+				if ((targetCoordinate.y+pieceOffsetY == 0 || targetCoordinate.y+pieceOffsetY == 10)&&(targetCoordinate.x+pieceOffsetX == 0 || targetCoordinate.x+pieceOffsetX == 10)) {
+					removePiece(gBlackPieces[i], i);
+				}
+				
 				/*Look at the other side for a white piece. INEFFICIENT!*/
-				if(gIsOccupied[targetCoordinate.y+pieceOffsetY][targetCoordinate.x+pieceOffsetX]){
-					for(var j=0; j<gWhitePieces.length; j++) {
-						if(gWhitePieces[j].row == targetCoordinate.y + pieceOffsetY && gWhitePieces[j].column == targetCoordinate.x + pieceOffsetX) {
-							removePiece(gBlackPieces[i], i);
+				try {
+					if(gIsOccupied[targetCoordinate.y+pieceOffsetY][targetCoordinate.x+pieceOffsetX]){
+						for(var j=0; j<gWhitePieces.length; j++) {
+							if(gWhitePieces[j].row == targetCoordinate.y + pieceOffsetY && gWhitePieces[j].column == targetCoordinate.x + pieceOffsetX) {
+								removePiece(gBlackPieces[i], i);
+							}
 						}
 					}
-				}
+				} catch (err){}
 			}
 		}
 	}
 	
 }
 
-/*Removes a piece from the game board then re-draws the board*/
+/*Removes a piece from the game board, updates piece array, then re-draws the board*/
 function removePiece(p, pieceArrayIndex) {
+	
 	gIsOccupied[p.row][p.column] = false;
 	
 	if(p.isBlack) {
